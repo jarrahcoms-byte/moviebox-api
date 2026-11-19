@@ -19,7 +19,7 @@ NIGERIA_IP = "197.211.52.65"
 # then paste the returned id below.
 [[kv_namespaces]]
 binding = "MOVIEBOX_SESSION_KV"
-id = "fe2b5cabe85248259cc65eccd84b9e4b"
+id = "65c5acadefce41f1ab7dfe19dc76b0ef"
 
 # [[routes]]
 # # Update with your actual Cloudflare zone if using custom domain
