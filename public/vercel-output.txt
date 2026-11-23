@@ -1,0 +1,1 @@
+Vercel output marker. MovieBox API requests are handled by the serverless function.
