@@ -191,7 +191,6 @@ async function attemptHostPool<T>(
       headers['X-Forwarded-For'] = nigeriaIp;
     }
     console.log(`[MovieBox Outgoing] URL: ${urlStr}`);
-    console.log(`[MovieBox Outgoing] Headers:`, JSON.stringify(headers));
 
     try {
       const activeFetch = (env as any).fetch || fetch;
