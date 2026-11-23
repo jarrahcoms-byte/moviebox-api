@@ -18,6 +18,7 @@
 
 import {
   fetchWithHostPool,
+  MovieBoxUpstreamError,
   PATHS,
   type MBSearchData,
   type MBDetailData,
@@ -628,77 +629,88 @@ export default {
       return json({ status: 'ok', worker: 'moviebox-worker', ts: Date.now() });
     }
 
-    if (path === '/debug-sig' && request.method === 'GET') {
-      const ts = 1782346250180;
-      const method = 'GET';
-      const accept = 'application/json';
-      const contentType = 'application/json';
-      const url = 'https://api6.aoneroom.com/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version=';
-      const body = null;
-      
-      const { generateSignature } = await import('./signing.js');
-      const sig = await generateSignature(method, accept, contentType, url, body, ts);
-      return json({ signature: sig });
-    }
-
     if (!isAuthorized(request, env)) {
       return err('Unauthorized', 401);
     }
 
+    try {
+      if (path === '/debug-sig' && request.method === 'GET') {
+        const ts = 1782346250180;
+        const method = 'GET';
+        const accept = 'application/json';
+        const contentType = 'application/json';
+        const signedUrl = 'https://api6.aoneroom.com/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version=';
+        const body = null;
+
+        const { generateSignature } = await import('./signing.js');
+        const sig = await generateSignature(method, accept, contentType, signedUrl, body, ts);
+        return json({ signature: sig });
+      }
+
     // POST /search
     if (path === '/search' && request.method === 'POST') {
-      return handleSearch(request, env);
+      return await handleSearch(request, env);
     }
 
     // GET /info/:subjectId
     const infoMatch = path.match(/^\/info\/([^/]+)$/);
     if (infoMatch && request.method === 'GET') {
-      return handleInfo(infoMatch[1], env);
+      return await handleInfo(infoMatch[1], env);
     }
 
     // GET /season/:subjectId
     const seasonMatch = path.match(/^\/season\/([^/]+)$/);
     if (seasonMatch && request.method === 'GET') {
-      return handleSeason(seasonMatch[1], env);
+      return await handleSeason(seasonMatch[1], env);
     }
 
     // GET /stream/:subjectId/all — must be checked before /stream/:subjectId
     const streamAllMatch = path.match(/^\/stream\/([^/]+)\/all$/);
     if (streamAllMatch && request.method === 'GET') {
-      return handleStreamAll(streamAllMatch[1], env);
+      return await handleStreamAll(streamAllMatch[1], env);
     }
 
     // GET /stream/:subjectId?se=X&ep=Y
     const streamMatch = path.match(/^\/stream\/([^/]+)$/);
     if (streamMatch && request.method === 'GET') {
-      const se = parseInt(url.searchParams.get('se') ?? '0');
-      const ep = parseInt(url.searchParams.get('ep') ?? '0');
-      return handleStream(streamMatch[1], se, ep, env);
+      const se = Number(url.searchParams.get('se') ?? '0');
+      const ep = Number(url.searchParams.get('ep') ?? '0');
+      if (!Number.isInteger(se) || !Number.isInteger(ep) || se < 0 || ep < 0) {
+        return err('Invalid season or episode number', 400);
+      }
+      return await handleStream(streamMatch[1], se, ep, env);
     }
 
     // GET /download/:subjectId
     const downloadMatch = path.match(/^\/download\/([^/]+)$/);
     if (downloadMatch && request.method === 'GET') {
-      return handleDownload(downloadMatch[1], env);
+      return await handleDownload(downloadMatch[1], env);
     }
 
     // GET /home/rows — must be checked before /home
     if (path === '/home/rows' && request.method === 'GET') {
-      return handleHomeRows(env);
+      return await handleHomeRows(env);
     }
 
     // GET /home/subjects?opId=X — must be checked before /home
     if (path === '/home/subjects' && request.method === 'GET') {
       const opId = url.searchParams.get('opId');
       if (!opId) return err('opId is required');
-      return handleHomeSubjects(opId, env);
+      return await handleHomeSubjects(opId, env);
     }
 
     // GET /home
     if (path === '/home' && request.method === 'GET') {
-      return handleHome(env);
+      return await handleHome(env);
     }
 
-    return err('Not found', 404);
+      return err('Not found', 404);
+    } catch (error) {
+      if (error instanceof MovieBoxUpstreamError) {
+        return err(error.message, error.status);
+      }
+      console.error('[API] Request failed:', error);
+      return err('Internal server error', 500);
+    }
   },
 };

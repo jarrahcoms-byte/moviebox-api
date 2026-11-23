@@ -55,7 +55,7 @@ const kvMock = {
 
 const env = {
   MOVIEBOX_SESSION_KV: kvMock,
-  MOVIEBOX_SECRET: process.env.MOVIEBOX_SECRET ?? 'local-secret-12345',
+  MOVIEBOX_SECRET: process.env.MOVIEBOX_SECRET ?? '',
   NIGERIA_IP:       process.env.NIGERIA_IP       ?? '105.113.77.237',
   fetch:            process.env.PROXY_URL        ? undiciFetch : fetch,
 };

@@ -172,7 +172,16 @@ async function readTokenFromKv(kv: KVNamespace): Promise<CachedToken | null> {
   try {
     const raw = await kv.get(KV_TOKEN_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as CachedToken;
+    const cached = JSON.parse(raw) as Partial<CachedToken>;
+    if (
+      typeof cached.token !== 'string' || !cached.token.trim() ||
+      typeof cached.expiresAtSeconds !== 'number' ||
+      !Number.isFinite(cached.expiresAtSeconds) || cached.expiresAtSeconds <= 0
+    ) {
+      await kv.delete(KV_TOKEN_KEY);
+      return null;
+    }
+    return cached as CachedToken;
   } catch (e) {
     console.warn(`[Signing] Failed to read/parse KV token: ${e}`);
     return null;

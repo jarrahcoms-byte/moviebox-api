@@ -142,9 +142,19 @@ async function buildHeaders(
 // first successful response along with the x-user header (if present) so the
 // caller can absorb a fresh/rotated token.
 
+export class MovieBoxUpstreamError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = 'MovieBoxUpstreamError';
+  }
+}
+
 interface HostPoolAttemptResult<T> {
   data: T | null;
   freshXUserToken: string | null;
+  httpStatuses: number[];
+  apiFailure: boolean;
+  successfulResponse: boolean;
   /** True if every host rejected specifically due to auth (401/403, or an
    *  API-level "invalid token" style code) rather than other errors — signals
    *  the caller should bootstrap a new token and retry once. */
@@ -176,6 +186,8 @@ async function attemptHostPool<T>(
   let freshXUserToken: string | null = null;
   let sawAuthFailure = false;
   let sawAnyResponse = false;
+  let apiFailure = false;
+  const httpStatuses: number[] = [];
 
   for (const base of HOST_POOL) {
     const url = new URL(`${base}${path}`);
@@ -208,11 +220,12 @@ async function attemptHostPool<T>(
       } as any);
 
       sawAnyResponse = true;
+      httpStatuses.push(response.status);
 
       const xUserToken = extractXUserToken(response);
       if (xUserToken) freshXUserToken = xUserToken;
 
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401 || response.status === 403 || response.status === 440) {
         console.warn(`[MovieBox] Host ${base} returned ${response.status} (auth) — trying next`);
         sawAuthFailure = true;
         continue;
@@ -226,10 +239,18 @@ async function attemptHostPool<T>(
       const data = await response.json() as { code: number; message?: string; data?: T };
 
       if (data.code === 0) {
-        return { data: (data.data ?? null) as T | null, freshXUserToken, authFailure: false };
+        return {
+          data: (data.data ?? null) as T | null,
+          freshXUserToken,
+          httpStatuses,
+          apiFailure,
+          successfulResponse: true,
+          authFailure: false,
+        };
       }
 
       console.warn(`[MovieBox] Host ${base} returned API code ${data.code}: ${data.message ?? ''} — trying next`);
+      apiFailure = true;
       if (data.message && /token|auth/i.test(data.message)) {
         sawAuthFailure = true;
       }
@@ -242,12 +263,25 @@ async function attemptHostPool<T>(
   return {
     data: null,
     freshXUserToken,
+    httpStatuses,
+    apiFailure,
+    successfulResponse: false,
     // Only treat as a pure auth failure if we got real responses back (not
     // just transport errors/timeouts) and at least one of them looked like
     // an auth rejection — otherwise this is a genuine host outage, and
     // retrying with a new token won't help.
     authFailure: sawAnyResponse && sawAuthFailure,
   };
+}
+
+function upstreamFailure(result: HostPoolAttemptResult<unknown>): MovieBoxUpstreamError {
+  if (result.httpStatuses.length === HOST_POOL.length && result.httpStatuses.every((status) => status === 404)) {
+    return new MovieBoxUpstreamError(404, 'Not found');
+  }
+  if (result.httpStatuses.length > 0 || result.apiFailure || result.authFailure) {
+    return new MovieBoxUpstreamError(502, 'MovieBox source rejected the request.');
+  }
+  return new MovieBoxUpstreamError(503, 'MovieBox source is unavailable.');
 }
 
 // ─── Public host pool fetcher (auth-aware) ────────────────────────────────────
@@ -297,11 +331,13 @@ export async function fetchWithHostPool<T>(
           finalDeviceId,
           finalGaid
         );
+        if (!result.freshXUserToken) throw upstreamFailure(result);
         return result.freshXUserToken;
       });
     } catch (e) {
       console.error(`[MovieBox] Auth bootstrap failed: ${e}`);
-      return null;
+      if (e instanceof MovieBoxUpstreamError) throw e;
+      throw new MovieBoxUpstreamError(503, 'MovieBox authentication is unavailable.');
     }
   }
 
@@ -317,6 +353,9 @@ export async function fetchWithHostPool<T>(
 
   if (result.data !== null) {
     return result.data;
+  }
+  if (result.successfulResponse) {
+    return null;
   }
 
   if (result.authFailure) {
@@ -343,18 +382,22 @@ export async function fetchWithHostPool<T>(
           finalDeviceId,
           finalGaid
         );
+        if (!bootstrapResult.freshXUserToken) throw upstreamFailure(bootstrapResult);
         return bootstrapResult.freshXUserToken;
       });
     } catch (e) {
       console.error(`[MovieBox] Re-bootstrap after auth failure failed: ${e}`);
-      return null;
+      if (e instanceof MovieBoxUpstreamError) throw e;
+      throw new MovieBoxUpstreamError(503, 'MovieBox authentication is unavailable.');
     }
 
     result = await attemptHostPool<T>(env, path, method, params, bodyStr, authToken, nigeriaIp, deviceId, gaid);
-    return result.data;
+    if (result.data !== null) return result.data;
+    if (result.successfulResponse) return null;
+    throw upstreamFailure(result);
   }
 
-  return null;
+  throw upstreamFailure(result);
 }
 
 // ─── Raw API response shapes ──────────────────────────────────────────────────
