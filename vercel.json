@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "regions": ["cpt1"],
+  "regions": ["sin1"],
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index.js" }
   ]
